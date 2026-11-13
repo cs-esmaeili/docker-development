@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# phprun <version> [args...]
+#
+# Uses PHP <version> right now: builds the image + creates the container if it
+# does not exist yet, then runs php with the given arguments.
+#
+#   phprun 8.2                 # start 8.2 and print php -v
+#   phprun 8.2 -m              # php -m on 8.2
+#   phprun 8.2 artisan migrate # php artisan migrate on 8.2
+#   phprun 8.2 -- composer install   # composer on 8.2
+set -euo pipefail
+
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/_common.sh"
+
+if [ "$#" -eq 0 ]; then
+  echo "usage: phprun <version> [php args...]   (phprun <version> -- composer ...)" >&2
+  echo "running: $(docker ps --filter name=infra-php- --format '{{.Names}}' | sed 's/^infra-php-//' | sort | tr '\n' ' ')" >&2
+  exit 2
+fi
+
+version="$(_dphp_norm "$1")"; shift
+if ! _dphp_valid "$version"; then
+  echo "phprun: '$version' is not a PHP version — use X.Y, e.g. 8.2 / 8.3 / 8.4" >&2
+  exit 2
+fi
+
+cmd="php"
+if [ "${1:-}" = "--" ]; then
+  shift
+  cmd="composer"
+fi
+
+# No command => just bring it up and show the version.
+[ "$#" -eq 0 ] && set -- -v
+
+_dphp_exec "$version" "$cmd" "$@"

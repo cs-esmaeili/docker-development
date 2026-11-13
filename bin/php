@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# php -> runs inside the default version from global/.env.
+# Other versions: phprun <version> ...
+# Host PHP escape hatch: PHP_HOST=1 php -v
+set -euo pipefail
+
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/_common.sh"
+
+if [[ "${PHP_HOST:-0}" == "1" ]]; then
+  exec "${PHP_HOST_BIN:-/usr/bin/php}" "$@"
+fi
+
+_dphp_exec "$(_dphp_default_version)" php "$@"

@@ -1,0 +1,200 @@
+name: ${COMPOSE_PROJECT_NAME:-infra}
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: infra-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_HOST: "%"
+      MYSQL_ALLOW_EMPTY_PASSWORD: ${MYSQL_ALLOW_EMPTY_PASSWORD:-no}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - infra
+
+  redis:
+    image: redis:7
+    container_name: infra-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - infra
+
+  redisinsight:
+    image: redis/redisinsight:${REDISINSIGHT_VERSION:-3.8}
+    container_name: infra-redisinsight
+    restart: unless-stopped
+    environment:
+      # accept the license so the UI opens straight into the app
+      RI_ACCEPT_TERMS_AND_CONDITIONS: "true"
+      # pre-register the shared redis as a connection
+      RI_REDIS_HOST: redis
+      RI_REDIS_PORT: 6379
+      RI_REDIS_ALIAS: infra-redis
+    ports:
+      - "${REDISINSIGHT_PORT:-5540}:5540"
+    volumes:
+      - redisinsight_data:/data
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5540/api/health/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - infra
+
+  pgadmin:
+    image: dpage/pgadmin4:${PGADMIN_VERSION:-9.19}
+    container_name: infra-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@local.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      # no second "master password" prompt on login
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PGADMIN_CONFIG_UPGRADE_CHECK_ENABLED: "False"
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      # pre-register the shared postgres server (see the file for credentials)
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/misc/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - infra
+
+  postgres:
+    image: postgres:16
+    container_name: infra-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - infra
+
+  mongo:
+    image: mongo:7
+    container_name: infra-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-mongo}
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - infra
+
+  dashboard:
+    # small PHP server; reuses the same php image as the `php` service
+    build:
+      context: ./php
+      args:
+        PHP_VERSION: ${PHP_VERSION:-8.4}
+    image: infra-php:${PHP_VERSION:-8.4}
+    container_name: infra-dashboard
+    restart: unless-stopped
+    command: ["php", "-S", "0.0.0.0:${DASHBOARD_PORT:-4002}", "-t", "/infra/dashboard"]
+    working_dir: /infra/dashboard
+    # host networking: port probes hit the published ports on 127.0.0.1
+    network_mode: host
+    volumes:
+      # mount the whole folder (not the single .env file) so editors that save
+      # by replacing the file are seen immediately; read-only
+      - ./:/infra:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:${DASHBOARD_PORT:-4002}/?json=1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  nginx:
+    image: nginx:alpine
+    container_name: infra-nginx
+    restart: unless-stopped
+    # host networking: `listen <port>` in a site conf is published directly,
+    # and host apps are reachable as 127.0.0.1:<port>.
+    network_mode: host
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/sites:/etc/nginx/conf.d:ro
+      # so static sites can serve a folder anywhere under $HOME
+      - ${HOME:-/root}:${HOME:-/root}:ro
+
+  php:
+    build:
+      context: ./php
+      args:
+        PHP_VERSION: ${PHP_VERSION:-8.4}
+    image: infra-php:${PHP_VERSION:-8.4}
+    container_name: infra-php-${PHP_VERSION:-8.4}
+    restart: unless-stopped
+    command: ["tail", "-f", "/dev/null"]
+    user: "1000:1000"
+    working_dir: ${HOME:-/root}
+    environment:
+      HOME: ${HOME:-/root}
+      COMPOSER_HOME: ${HOME:-/root}/.composer
+      COMPOSER_CACHE_DIR: ${HOME:-/root}/.cache/composer
+    volumes:
+      - ${HOME:-/root}:${HOME:-/root}
+      - /tmp:/tmp
+    # host networking: 127.0.0.1 inside the container IS the host's loopback,
+    # so `php artisan serve --host=127.0.0.1 --port=X` behaves like local PHP.
+    network_mode: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: infra-phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+    ports:
+      - "${PMA_PORT:-8081}:80"
+    depends_on:
+      - mysql
+    networks:
+      - infra
+
+volumes:
+  mysql_data:
+  redis_data:
+  redisinsight_data:
+  postgres_data:
+  pgadmin_data:
+  mongo_data:
+
+networks:
+  infra:
+    # Fixed name so bin/php can attach per-version php containers to it.
+    name: infra
