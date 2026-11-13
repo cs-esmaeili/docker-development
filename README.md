@@ -3,7 +3,7 @@
 Shared Docker infra for local development — one stack for the whole machine.
 
 - **MySQL** — `localhost:${MYSQL_PORT}` (root, empty password)
-- **PostgreSQL** — `localhost:${POSTGRES_PORT}` (`POSTGRES_USER`/`POSTGRES_PASSWORD`)
+- **PostgreSQL + pgvector** — `localhost:${POSTGRES_PORT}` (`POSTGRES_USER`/`POSTGRES_PASSWORD`, vector search ready)
 - **MongoDB** — `localhost:${MONGO_PORT}` (`MONGO_USER`/`MONGO_PASSWORD`)
 - **Redis** — `localhost:${REDIS_PORT}`
 - **RedisInsight** — `http://localhost:${REDISINSIGHT_PORT}` (Redis GUI)
@@ -20,6 +20,11 @@ docker compose up -d php                          # only the default php contain
 `php -v` also starts/creates the default container if it is not running.
 
 Config lives in `global/.env` (`PHP_VERSION`, ports, credentials).
+
+Web ports are grouped in the 4000 range: dashboard `4000`, phpMyAdmin `4001`,
+pgAdmin `4002`, RedisInsight `4003`; nginx site confs take `5000` and up.
+Database ports stay on their defaults (MySQL `3306`, Postgres `5432`,
+Mongo `27017`, Redis `6370`).
 
 ## php on the host
 
@@ -200,10 +205,61 @@ MONGODB_URI=mongodb://root:mongo@127.0.0.1:27017/?authSource=admin
 Inside a php container use `mysql:3306`, `postgres:5432`, `mongo:27017`,
 `redis:6379` instead of `127.0.0.1` (container name is `mongo`, not `mongodb`).
 
+## pgvector (AI / RAG)
+
+Postgres runs `pgvector/pgvector:pg17`, so the `vector` type and ANN indexes are
+available without building anything.
+
+```bash
+docker exec -it infra-postgres psql -U postgres -c '\dx'   # vector, pg_trgm, ...
+```
+
+On a **fresh** `postgres_data` volume `global/postgres/init/00-extensions.sql`
+enables `vector`, `pg_trgm`, `unaccent`, `uuid-ossp` and `pgcrypto` automatically.
+On an existing volume run it once:
+
+```bash
+docker exec -i infra-postgres psql -U postgres < global/postgres/init/00-extensions.sql
+```
+
+Embedding table with a cosine HNSW index:
+
+```sql
+CREATE TABLE documents (
+    id        bigserial PRIMARY KEY,
+    content   text NOT NULL,
+    metadata  jsonb NOT NULL DEFAULT '{}'::jsonb,
+    embedding vector(1536)          -- must match your model's dimension
+);
+
+CREATE INDEX documents_embedding_hnsw
+    ON documents USING hnsw (embedding vector_cosine_ops);
+
+-- nearest neighbours: 1 - cosine distance = similarity
+SELECT id, content, 1 - (embedding <=> $1) AS similarity
+FROM documents
+ORDER BY embedding <=> $1
+LIMIT 5;
+```
+
+Operators: `<=>` cosine distance, `<#>` negative inner product, `<->` L2.
+HNSW is the good default; IVFFlat (`lists ≈ rows / 1000`) is the lighter
+alternative.
+
+From PHP the embedding is just a string literal, so any driver works:
+
+```php
+$pdo->prepare('INSERT INTO documents (content, embedding) VALUES (?, ?)')
+    ->execute([$text, '[' . implode(',', $vector) . ']']);
+```
+
+Reach it as `postgres:5432` from other containers, `127.0.0.1:5432` from the host
+(or `host.docker.internal:5432` from a container on another network).
+
 ## Dashboard
 
 Web overview of the whole stack at `http://localhost:${DASHBOARD_PORT}` (default
-`4002`). It shows every service, its port, live status, latency and container
+`4000`). It shows every service, its port, live status, latency and container
 state, plus the ports of the nginx site confs.
 
 - **Ports come from `global/.env`** and are re-read on every request, so changing
@@ -221,7 +277,7 @@ docker logs -f infra-dashboard
 
 ## RedisInsight
 
-Web GUI for Redis at `http://localhost:${REDISINSIGHT_PORT}` (default `5540`).
+Web GUI for Redis at `http://localhost:${REDISINSIGHT_PORT}` (default `4003`).
 
 `infra-redis` is pre-registered in the UI (host `redis:6379`, alias `infra-redis`),
 so it is ready on first launch. Connections and settings persist in the
@@ -239,7 +295,7 @@ host. Upgrade by bumping `REDISINSIGHT_VERSION` in `.env`.
 
 ## pgAdmin
 
-Web GUI for PostgreSQL at `http://localhost:${PGADMIN_PORT}` (default `5050`).
+Web GUI for PostgreSQL at `http://localhost:${PGADMIN_PORT}` (default `4002`).
 
 Login with `PGADMIN_EMAIL` / `PGADMIN_PASSWORD` from `.env` (defaults
 `admin@local.dev` / `admin`). The shared postgres is pre-registered from

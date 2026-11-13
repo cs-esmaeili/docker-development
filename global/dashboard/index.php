@@ -163,15 +163,26 @@ foreach ($docker['items'] as $container) {
     }
 }
 
+$mysqlUser = $env['MYSQL_ROOT_USERNAME'] ?? 'root';
+$mysqlPass = ($env['MYSQL_ALLOW_EMPTY_PASSWORD'] ?? '') === 'yes'
+    ? ''
+    : ($env['MYSQL_ROOT_PASSWORD'] ?? '');
+
 $defs = [
-    ['key' => 'mysql', 'service' => 'mysql', 'name' => 'MySQL', 'desc' => 'MySQL 8 · relational database', 'env' => 'MYSQL_PORT', 'default' => 3306, 'web' => false, 'color' => '#3E9BFF', 'icon' => 'database'],
-    ['key' => 'postgres', 'service' => 'postgres', 'name' => 'PostgreSQL', 'desc' => 'PostgreSQL 16 · relational database', 'env' => 'POSTGRES_PORT', 'default' => 5432, 'web' => false, 'color' => '#7C9CFF', 'icon' => 'database'],
-    ['key' => 'mongo', 'service' => 'mongo', 'name' => 'MongoDB', 'desc' => 'MongoDB 7 · document store', 'env' => 'MONGO_PORT', 'default' => 27017, 'web' => false, 'color' => '#4ADE80', 'icon' => 'layers'],
-    ['key' => 'redis', 'service' => 'redis', 'name' => 'Redis', 'desc' => 'Redis 7 · cache / queues', 'env' => 'REDIS_PORT', 'default' => 6379, 'web' => false, 'color' => '#FF6B6B', 'icon' => 'bolt'],
-    ['key' => 'phpmyadmin', 'service' => 'phpmyadmin', 'name' => 'phpMyAdmin', 'desc' => 'Web UI for MySQL', 'env' => 'PMA_PORT', 'default' => 8081, 'web' => true, 'color' => '#A78BFA', 'icon' => 'layout'],
-    ['key' => 'pgadmin', 'service' => 'pgadmin', 'name' => 'pgAdmin', 'desc' => 'Web UI for PostgreSQL', 'env' => 'PGADMIN_PORT', 'default' => 5050, 'web' => true, 'color' => '#38BDF8', 'icon' => 'layout'],
-    ['key' => 'redisinsight', 'service' => 'redisinsight', 'name' => 'RedisInsight', 'desc' => 'Web UI for Redis', 'env' => 'REDISINSIGHT_PORT', 'default' => 5540, 'web' => true, 'color' => '#FB7185', 'icon' => 'gauge'],
-    ['key' => 'dashboard', 'service' => 'dashboard', 'name' => 'Dashboard', 'desc' => 'This page · live infra overview', 'env' => 'DASHBOARD_PORT', 'default' => 4002, 'web' => true, 'color' => '#22D3EE', 'icon' => 'grid'],
+    ['key' => 'mysql', 'service' => 'mysql', 'name' => 'MySQL', 'desc' => 'MySQL 8 · relational database', 'env' => 'MYSQL_PORT', 'default' => 3306, 'web' => false, 'color' => '#3E9BFF', 'icon' => 'database',
+        'auth' => ['label' => 'MySQL', 'user' => $mysqlUser, 'pass' => $mysqlPass]],
+    ['key' => 'postgres', 'service' => 'postgres', 'name' => 'PostgreSQL', 'desc' => 'PostgreSQL 17 + pgvector · relational + vector DB', 'env' => 'POSTGRES_PORT', 'default' => 5432, 'web' => false, 'color' => '#7C9CFF', 'icon' => 'database',
+        'auth' => ['label' => 'PostgreSQL', 'user' => $env['POSTGRES_USER'] ?? 'postgres', 'pass' => $env['POSTGRES_PASSWORD'] ?? 'postgres']],
+    ['key' => 'mongo', 'service' => 'mongo', 'name' => 'MongoDB', 'desc' => 'MongoDB 7 · document store', 'env' => 'MONGO_PORT', 'default' => 27017, 'web' => false, 'color' => '#4ADE80', 'icon' => 'layers',
+        'auth' => ['label' => 'MongoDB', 'user' => $env['MONGO_USER'] ?? 'root', 'pass' => $env['MONGO_PASSWORD'] ?? 'mongo']],
+    ['key' => 'redis', 'service' => 'redis', 'name' => 'Redis', 'desc' => 'Redis 7 · cache / queues', 'env' => 'REDIS_PORT', 'default' => 6379, 'web' => false, 'color' => '#FF6B6B', 'icon' => 'bolt',
+        'auth' => ['label' => 'Redis', 'user' => null, 'pass' => null, 'note' => 'no password']],
+    ['key' => 'phpmyadmin', 'service' => 'phpmyadmin', 'name' => 'phpMyAdmin', 'desc' => 'Web UI for MySQL', 'env' => 'PMA_PORT', 'default' => 4001, 'web' => true, 'color' => '#A78BFA', 'icon' => 'layout',
+        'auth' => ['label' => 'MySQL root', 'user' => $mysqlUser, 'pass' => $mysqlPass]],
+    ['key' => 'pgadmin', 'service' => 'pgadmin', 'name' => 'pgAdmin', 'desc' => 'Web UI for PostgreSQL', 'env' => 'PGADMIN_PORT', 'default' => 4002, 'web' => true, 'color' => '#38BDF8', 'icon' => 'layout',
+        'auth' => ['label' => 'pgAdmin', 'user' => $env['PGADMIN_EMAIL'] ?? 'admin@local.dev', 'pass' => $env['PGADMIN_PASSWORD'] ?? 'admin']],
+    ['key' => 'redisinsight', 'service' => 'redisinsight', 'name' => 'RedisInsight', 'desc' => 'Web UI for Redis', 'env' => 'REDISINSIGHT_PORT', 'default' => 4003, 'web' => true, 'color' => '#FB7185', 'icon' => 'gauge',
+        'auth' => ['label' => 'RedisInsight', 'user' => null, 'pass' => null, 'note' => 'no login · infra-redis pre-registered']],
 ];
 
 $services = [];
@@ -194,6 +205,7 @@ foreach ($defs as $def) {
         'desc'           => $def['desc'],
         'port'           => $port,
         'web'            => $def['web'],
+        'auth'           => $def['auth'] ?? null,
         'color'          => $def['color'],
         'icon'           => $def['icon'],
         'envKey'         => $def['env'],
@@ -319,14 +331,18 @@ header('X-Content-Type-Options: nosniff');
   .live i{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 0 0 currentColor;animation:pulse 2.2s infinite}
   .live[data-ok="0"]{color:var(--red)}
   .live[data-ok="0"] i{animation:none}
+  .checking{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
+  .checking[hidden]{display:none}
+  .checking i{width:11px;height:11px;border-radius:50%;border:1.6px solid rgba(255,255,255,.16);border-top-color:#67e8f9;animation:spin .7s linear infinite}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(52,211,153,.5)}70%{box-shadow:0 0 0 6px rgba(52,211,153,0)}100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}}
 
   /* grid + cards */
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px}
   .card{
-    position:relative;display:flex;flex-direction:column;gap:14px;padding:18px;
+    position:relative;display:flex;flex-direction:column;gap:15px;padding:20px;
     border:1px solid var(--stroke);border-radius:var(--radius);
     background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.018));
+    box-shadow:0 14px 34px -28px rgba(0,0,0,.95);
     overflow:hidden;isolation:isolate;
     animation:rise .45s both;animation-delay:calc(var(--i,0)*40ms);
     transition:transform .25s,border-color .25s,box-shadow .25s;
@@ -370,6 +386,37 @@ header('X-Content-Type-Options: nosniff');
   .actions{display:flex;gap:8px}
   .actions .btn{flex:1}
   .copy-mini{flex:0 0 auto;width:36px;padding:9px}
+  .creds{
+    display:flex;flex-direction:column;gap:9px;
+    padding:12px 13px 13px;border-radius:13px;
+    background:rgba(0,0,0,.26);
+    border:1px solid color-mix(in srgb,var(--accent) 22%,var(--stroke));
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.03)
+  }
+  .creds-head{display:flex;align-items:center;gap:8px;min-width:0}
+  .creds .tag{
+    flex:0 0 auto;font-size:9.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);
+    border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);
+    padding:2px 6px;border-radius:5px
+  }
+  .creds .who{color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cred-row{
+    display:grid;grid-template-columns:70px minmax(0,1fr) 28px;align-items:center;gap:8px;min-height:26px
+  }
+  .cred-row .ck{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint)}
+  .cred-row .cv{
+    font-family:var(--mono);font-size:13.5px;color:var(--text);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+  }
+  .cred-row .cv.empty{font-size:12px;font-style:italic;color:var(--faint)}
+  .cpy{
+    width:28px;height:28px;padding:0;display:grid;place-items:center;border-radius:8px;
+    border:1px solid var(--stroke);background:rgba(255,255,255,.05);color:var(--muted);
+    cursor:pointer;transition:background .18s,color .18s,border-color .18s
+  }
+  .cpy:hover{background:rgba(255,255,255,.1);color:var(--text);border-color:rgba(255,255,255,.2)}
+  .creds .note{font-size:12px;color:var(--muted);line-height:1.45}
   .card-foot{
     display:flex;align-items:center;gap:6px;padding-top:11px;border-top:1px solid rgba(255,255,255,.06);
     color:var(--faint);font-size:11px;font-family:var(--mono);
@@ -445,7 +492,7 @@ header('X-Content-Type-Options: nosniff');
       <button class="btn icon" id="refresh" title="Refresh now" aria-label="Refresh now">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
       </button>
-      <label class="auto" title="Reload every 10 seconds">
+      <label class="auto" title="Check every 10s — repaint only when something changes">
         <input type="checkbox" id="auto" checked>
         Auto
       </label>
@@ -454,6 +501,7 @@ header('X-Content-Type-Options: nosniff');
 
   <div class="meta">
     <span class="live" id="live" data-ok="1"><i></i><span id="liveText">Live</span></span>
+    <span class="checking" id="checking" hidden><i></i>checking</span>
     <span class="sep">·</span>
     <span>updated <span id="updated">—</span></span>
     <span class="sep">·</span>
@@ -500,7 +548,7 @@ header('X-Content-Type-Options: nosniff');
     open: '<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/>',
   };
   const LABELS = {up: 'Running', starting: 'Starting', down: 'Stopped'};
-  const state = {timer: null, busy: false, data: null, query: ''};
+  const state = {timer: null, busy: false, data: null, query: '', fp: ''};
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const icon = (name, size = 20) =>
@@ -540,16 +588,42 @@ header('X-Content-Type-Options: nosniff');
       ? `<a class="btn primary" href="${esc(base() + ':' + s.port)}" target="_blank" rel="noopener">${icon('open', 14)} Open</a>`
       : `<button class="btn primary" data-copy="${esc(address(s))}">${icon('copy', 14)} Copy</button>`;
 
+    const authHtml = (() => {
+      if (!s.auth) return '';
+      const u = s.auth.user, p = s.auth.pass;
+      const hasCreds = u !== null && u !== undefined;
+      const row = (kind, value) => {
+        const empty = value === null || value === undefined || value === '';
+        return `<div class="cred-row">
+          <span class="ck">${kind}</span>
+          <span class="cv${empty ? ' empty' : ''}">${empty ? '(empty)' : esc(value)}</span>
+          ${empty
+            ? ''
+            : `<button class="cpy" data-copy="${esc(value)}" title="Copy ${kind}" aria-label="Copy ${kind}">${icon('copy', 13)}</button>`}
+        </div>`;
+      };
+      return `<div class="creds">
+        <div class="creds-head">
+          <span class="tag">login</span>
+          <span class="who">${esc(s.auth.label || 'login')}</span>
+        </div>
+        ${hasCreds
+          ? row('user', u) + row('password', p)
+          : `<div class="note">${esc(s.auth.note || 'no login required')}</div>`}
+      </div>`;
+    })();
+
     el.innerHTML = `
       <div class="card-top">
         <div class="icon">${icon(s.icon)}</div>
-        <span class="pill" data-status="${esc(s.status)}"><i></i>${LABELS[s.status] || esc(s.status)}</span>
+        <span class="pill" data-status="${esc(s.status)}"><i></i><span class="pill-text">${LABELS[s.status] || esc(s.status)}</span></span>
       </div>
       <div class="name-row">
         <span class="name">${esc(s.name)}</span>
-        ${s.latency != null ? `<span class="lat">${esc(s.latency)} ms</span>` : ''}
+        <span class="lat" data-lat="${esc(s.key)}">${s.latency != null ? esc(s.latency) + ' ms' : ''}</span>
       </div>
       <div class="desc">${esc(s.desc)}</div>
+      ${authHtml}
       <div class="port-row">
         <span class="port">${esc(s.port)}<small>${s.web ? 'http' : 'tcp'}</small></span>
         <span class="env-key" title="${esc(s.custom ? 'overridden in .env' : 'default value')}"><b>${esc(s.envKey)}</b></span>
@@ -568,11 +642,54 @@ header('X-Content-Type-Options: nosniff');
     return el;
   }
 
+  const cards = new Map();
+  let sitesSig = '';
+
+  const cardSig = (s) => JSON.stringify([s.name, s.desc, s.port, s.web, s.envKey, s.auth]);
+
+  /* Patch the grid in place: existing cards keep their DOM (no flashing, no
+     animation restart) and only their live bits are updated. */
+  function syncCards(services) {
+    const grid = $('#services');
+    const seen = new Set();
+    services.forEach((s, i) => {
+      seen.add(s.key);
+      const sig = cardSig(s);
+      const el = cards.get(s.key);
+      if (el && el._sig === sig) {
+        const pill = el.querySelector('.pill');
+        pill.dataset.status = s.status;
+        const label = el.querySelector('.pill-text');
+        if (label) label.textContent = LABELS[s.status] || s.status;
+        const lat = el.querySelector('[data-lat]');
+        if (lat) lat.textContent = s.latency != null ? s.latency + ' ms' : '';
+        const foot = el.querySelector('.cstate');
+        if (foot) foot.textContent = (s.container || 'not in compose') + (s.containerStatus ? ' · ' + s.containerStatus : '');
+        return;
+      }
+      // new service, or something structural changed (port, credentials, ...)
+      const fresh = card(s, i);
+      fresh._sig = sig;
+      if (el) el.replaceWith(fresh); else grid.appendChild(fresh);
+      cards.set(s.key, fresh);
+    });
+    cards.forEach((el, key) => {
+      if (!seen.has(key)) {
+        el.remove();
+        cards.delete(key);
+      }
+    });
+    applyFilter();
+  }
+
   function renderSites(sites) {
     const wrap = $('#sites-wrap');
     const list = $('#sites');
+    const sig = JSON.stringify(sites.map((s) => [s.name, s.conf, s.port, s.status]));
     $('#sites-count').textContent = sites.length;
     wrap.hidden = sites.length === 0;
+    if (sig === sitesSig) return;
+    sitesSig = sig;
     list.innerHTML = '';
     sites.forEach((site) => {
       const row = document.createElement('div');
@@ -620,11 +737,8 @@ header('X-Content-Type-Options: nosniff');
       ? 'Docker daemon connected'
       : '<span class="warn">Docker socket unavailable — showing port checks only</span>';
 
-    const grid = $('#services');
-    grid.innerHTML = '';
-    data.services.forEach((s, i) => grid.appendChild(card(s, i)));
+    syncCards(data.services || []);
     renderSites(data.sites || []);
-    applyFilter();
   }
 
   function setLive(ok, text) {
@@ -633,21 +747,37 @@ header('X-Content-Type-Options: nosniff');
     $('#liveText').textContent = text || (ok ? 'Live' : 'Offline');
   }
 
+  /* Coarse "did anything user-visible change?" check — used only for the toast.
+     Latency and container uptime strings change on every poll and are ignored. */
+  function snapshot(d) {
+    return JSON.stringify({
+      docker: d.docker,
+      services: (d.services || []).map((s) => [s.key, s.status, s.port, s.container, s.image, s.web, s.auth]),
+      sites: (d.sites || []).map((s) => [s.name, s.conf, s.port, s.status]),
+    });
+  }
+
   async function load(manual = false) {
     if (state.busy) return;
     state.busy = true;
+    $('#checking').hidden = false;
     $('#refresh').classList.add('spin');
     try {
       const res = await fetch('?json=1', {cache: 'no-store'});
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      render(await res.json());
+      const data = await res.json();
+      const snap = snapshot(data);
+      const changed = snap !== state.fp;
+      state.fp = snap;
+      render(data);                 // in-place update, nothing gets wiped
       setLive(true);
-      if (manual) toast('Refreshed');
+      if (manual) toast(changed ? 'Updated' : 'No changes');
     } catch (err) {
       setLive(false, 'Unreachable');
       if (manual) toast('Refresh failed: ' + err.message, true);
     } finally {
       state.busy = false;
+      $('#checking').hidden = true;
       $('#refresh').classList.remove('spin');
     }
   }
